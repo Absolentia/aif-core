@@ -164,7 +164,7 @@ fn collect_paths(schema: &Value, prefix: &str, acc: &mut AHashSet<String>) {
 /// infer_schema(samples: List[str]) -> str(JSON)
 #[pyfunction]
 fn infer_schema(samples: Vec<String>) -> PyResult<String> {
-    let node = parse_samples(&samples).map_err(|e| PyValueError::new_err(e))?;
+    let node = parse_samples(&samples).map_err(PyValueError::new_err)?;
     let schema = node.to_json_schema();
     let output = serde_json::to_string_pretty(&json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -197,12 +197,12 @@ fn diff_schemas(a: String, b: String) -> PyResult<String> {
         "removed": removed,
         "common": common
     });
-    Ok(serde_json::to_string_pretty(&out)
-        .map_err(|e| PyValueError::new_err(format!("Serialize error: {e}")))?)
+    serde_json::to_string_pretty(&out)
+        .map_err(|e| PyValueError::new_err(format!("Serialize error: {e}")))
 }
 
 #[pymodule]
-fn aif_core(_py: Python, m: &PyModule) -> PyResult<()> {
+fn aif_core(_py: Python, m: &pyo3::Bound<pyo3::types::PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_schema, m)?)?;
     m.add_function(wrap_pyfunction!(diff_schemas, m)?)?;
     Ok(())
