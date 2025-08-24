@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use serde_json::{json, Map, Value};
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum TypeTag {
     Null,
     Boolean,
