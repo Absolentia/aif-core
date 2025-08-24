@@ -18,15 +18,27 @@ Coding standards
 
 Local dev
 
+Note: `maturin develop` requires an active Python virtual environment (virtualenv or conda). 
+Create and activate a `.venv` (or `conda activate <env>`) first, otherwise maturin will fail to find an environment.
+
 ```bash
 rustup default stable
 cargo fmt --all
 cargo clippy -- -D warnings
 cargo test
 
+python3 -m venv .venv
+source .venv/bin/activate
 pip install maturin
 maturin develop --release
 python -c "import aif_core; print('import-ok')"
+```
+
+Alternative (without activating a venv), build a wheel and install it manually:
+
+```bash
+maturin build --release
+pip install target/wheels/*.whl
 ```
 
 Security & compliance
