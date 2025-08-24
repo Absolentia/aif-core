@@ -1,0 +1,44 @@
+name: CI
+
+on:
+    push:
+        branches: [ main ]
+    pull_request:
+
+jobs:
+    rust:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+            - name: Format
+              run: cargo fmt --all -- --check
+            - name: Clippy
+              run: cargo clippy -- -D warnings
+            - name: Tests
+              run: cargo test --all --release
+
+    cargo-deny:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Install cargo-deny
+              run: cargo install cargo-deny
+            - name: Check licenses & advisories
+              run: cargo deny check
+
+    python-binding:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.12'
+            - name: Install maturin
+              run: pip install maturin
+            - name: Build & develop
+              run: maturin develop --release
+            - name: Import smoke test
+              run: python - << 'PY'
+                   import aif_core; print('import-ok')
+                   PY

@@ -1,0 +1,21 @@
+# cargo-deny policy for AIF Core
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "warn"
+unsound = "deny"
+
+[licenses]
+allow = [
+"Apache-2.0", "MIT", "BSD-3-Clause", "BSD-2-Clause", "ISC",
+"Zlib", "Unicode-DFS-2016", "0BSD", "MIT-0", "CC0-1.0"
+]
+deny = ["GPL-3.0", "AGPL-3.0", "LGPL-3.0", "LGPL-2.1"]
+allow-osi-fsf-free = "either"
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+skip = []
