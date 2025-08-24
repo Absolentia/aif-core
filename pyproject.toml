@@ -12,3 +12,6 @@ classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
 ]
+
+[tool.maturin]
+features = ["extension-module"]

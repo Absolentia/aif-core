@@ -161,27 +161,23 @@ fn collect_paths(schema: &Value, prefix: &str, acc: &mut AHashSet<String>) {
     }
 }
 
-/// infer_schema(samples: List[str]) -> str(JSON)
-#[pyfunction]
-fn infer_schema(samples: Vec<String>) -> PyResult<String> {
-    let node = parse_samples(&samples).map_err(PyValueError::new_err)?;
+// Rust-native API used by integration tests
+pub fn infer_schema_rs(samples: &[String]) -> Result<String, String> {
+    let node = parse_samples(samples).map_err(|e| e)?;
     let schema = node.to_json_schema();
-    let output = serde_json::to_string_pretty(&json!({
+    serde_json::to_string_pretty(&json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object", // по умолчанию предполагаем объект на верхнем уровне (MVP)
+        "type": "object",
         "properties": schema.get("properties").cloned().unwrap_or_else(|| json!({}))
     }))
-    .map_err(|e| PyValueError::new_err(format!("Serialize error: {e}")))?;
-    Ok(output)
+    .map_err(|e| format!("Serialize error: {e}"))
 }
 
-/// diff_schemas(a: str(JSON), b: str(JSON)) -> str(JSON)
-#[pyfunction]
-fn diff_schemas(a: String, b: String) -> PyResult<String> {
-    let va: Value = serde_json::from_str(&a)
-        .map_err(|e| PyValueError::new_err(format!("schema A parse error: {e}")))?;
-    let vb: Value = serde_json::from_str(&b)
-        .map_err(|e| PyValueError::new_err(format!("schema B parse error: {e}")))?;
+pub fn diff_schemas_rs(a: &str, b: &str) -> Result<String, String> {
+    let va: Value = serde_json::from_str(a)
+        .map_err(|e| format!("schema A parse error: {e}"))?;
+    let vb: Value = serde_json::from_str(b)
+        .map_err(|e| format!("schema B parse error: {e}"))?;
 
     let mut ka = AHashSet::default();
     let mut kb = AHashSet::default();
@@ -198,12 +194,98 @@ fn diff_schemas(a: String, b: String) -> PyResult<String> {
         "common": common
     });
     serde_json::to_string_pretty(&out)
-        .map_err(|e| PyValueError::new_err(format!("Serialize error: {e}")))
+        .map_err(|e| format!("Serialize error: {e}"))
+}
+
+/// infer_schema(samples: List[str]) -> str(JSON)
+#[pyfunction]
+fn infer_schema(samples: Vec<String>) -> PyResult<String> {
+    infer_schema_rs(&samples).map_err(PyValueError::new_err)
+}
+
+/// diff_schemas(a: str(JSON), b: str(JSON)) -> str(JSON)
+#[pyfunction]
+fn diff_schemas(a: String, b: String) -> PyResult<String> {
+    diff_schemas_rs(&a, &b).map_err(PyValueError::new_err)
 }
 
 #[pymodule]
-fn aif_core(_py: Python, m: &pyo3::Bound<pyo3::types::PyModule>) -> PyResult<()> {
+fn aif_core(_py: Python, m: &Bound<pyo3::types::PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(infer_schema, m)?)?;
     m.add_function(wrap_pyfunction!(diff_schemas, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn infer_simple_schema_object() {
+        let samples = vec![
+            r#"{"id":1,"name":"Alice","tags":["a","b"]}"#.to_string(),
+            r#"{"id":2,"name":"Bob","tags":[]}"#.to_string(),
+        ];
+        let out = infer_schema(samples).expect("infer ok");
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["type"], "object");
+        assert!(v["properties"].get("id").is_some());
+        assert!(v["properties"].get("name").is_some());
+        assert!(v["properties"].get("tags").is_some());
+    }
+
+    #[test]
+    fn diff_detects_added_removed_common() {
+        // Схема A: только id
+        let a = r#"{
+          "$schema":"https://json-schema.org/draft/2020-12/schema",
+          "type":"object",
+          "properties":{"id":{"type":"integer"}}
+        }"#.to_string();
+
+        // Схема B: id + name + tags
+        let b = r#"{
+          "$schema":"https://json-schema.org/draft/2020-12/schema",
+          "type":"object",
+          "properties":{
+            "id":{"type":"integer"},
+            "name":{"type":"string"},
+            "tags":{"type":"array","items":{"type":"string"}}
+          }
+        }"#.to_string();
+
+        let out = diff_schemas(a, b).expect("diff ok");
+        let d: Value = serde_json::from_str(&out).unwrap();
+
+        let added = d["added"].as_array().unwrap();
+        let added_set: std::collections::HashSet<_> =
+            added.iter().filter_map(|s| s.as_str()).collect();
+        assert!(added_set.contains("name"));
+        assert!(added_set.contains("tags"));   // для массивов будет ещё "tags[]", это нормально
+
+        let removed = d["removed"].as_array().unwrap();
+        assert!(removed.is_empty());
+
+        let common = d["common"].as_array().unwrap();
+        assert!(common.iter().any(|s| s.as_str() == Some("id")));
+    }
+
+    #[test]
+    fn roundtrip_infer_then_diff() {
+        let s1 = vec![r#"{"a":{"x":1}}"#.to_string()];
+        let s2 = vec![r#"{"a":{"x":1,"y":"u"},"b":[1,2]}"#.to_string()];
+
+        let a = infer_schema(s1).unwrap();
+        let b = infer_schema(s2).unwrap();
+        let out = diff_schemas(a, b).unwrap();
+        let d: Value = serde_json::from_str(&out).unwrap();
+        let added = d["added"].as_array().unwrap();
+
+        let added_set: std::collections::HashSet<_> =
+            added.iter().filter_map(|s| s.as_str()).collect();
+        assert!(added_set.contains("a.y"));
+        assert!(added_set.contains("b"));      // и, скорее всего, "b[]" тоже появится
+    }
 }
